@@ -6,6 +6,7 @@ This tool allows you to browse a folder containing YAML files (.yaml or .yml), v
  install Python 3.6 or newer, 
 
 1.  install library:
+
         ```bash
         pip install PyYAML
         ```
