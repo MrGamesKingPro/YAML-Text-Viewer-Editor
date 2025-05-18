@@ -31,19 +31,25 @@ class YamlTextEditorApp:
         self.scrollbar = tk.Scrollbar(main_frame)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Replaced Listbox with Text widget for colored text
         self.text_display_area = tk.Text(main_frame, yscrollcommand=self.scrollbar.set,
                                          font=("Courier New", 10), wrap=tk.NONE, state=tk.DISABLED)
         self.text_display_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.config(command=self.text_display_area.yview)
 
+        # Event bindings
         self.text_display_area.bind("<Double-1>", self.on_double_click)
+        # Add new binding for single mouse press
+        self.text_display_area.bind("<ButtonPress-1>", self.on_mouse_press)
+
 
         # Define color tags for the Text widget
         self.text_display_area.tag_configure("filename_color", foreground="green")
         self.text_display_area.tag_configure("messagekey_color", foreground="red")
         self.text_display_area.tag_configure("text_preview_color", foreground="black") # "Color as is"
         self.text_display_area.tag_configure("separator_color", foreground="grey50") # For " :: "
+        # Add new tag for line highlighting
+        self.text_display_area.tag_configure("line_highlight", background="light sky blue")
+
 
         # --- Status Bar ---
         self.status_var = tk.StringVar()
@@ -58,10 +64,6 @@ class YamlTextEditorApp:
             self.load_files_from_folder(folder_selected)
 
     def _extract_texts_recursive(self, yaml_data_node, current_path_parts, filepath, filename):
-        """
-        Recursively traverses the YAML data to find string values.
-        Appends info to self.text_data and inserts styled text into self.text_display_area.
-        """
         if isinstance(yaml_data_node, dict):
             for key, value in yaml_data_node.items():
                 key_str = str(key)
@@ -76,10 +78,8 @@ class YamlTextEditorApp:
                         'original_text': value 
                     })
                     
-                    # Replace newlines for better display in single-line preview
                     display_text_preview = str(value).replace('\n', ' ').replace('\r', '')
                     
-                    # Insert into Text widget with colors
                     self.text_display_area.insert(tk.END, filename, "filename_color")
                     self.text_display_area.insert(tk.END, " :: ", "separator_color")
                     self.text_display_area.insert(tk.END, message_key_path, "messagekey_color")
@@ -89,15 +89,15 @@ class YamlTextEditorApp:
                     if len(display_text_preview) > 100:
                         preview += "..."
                     self.text_display_area.insert(tk.END, preview, "text_preview_color")
-                    self.text_display_area.insert(tk.END, "\n") # Newline for each item
+                    self.text_display_area.insert(tk.END, "\n")
 
                     self._item_count_for_status += 1
                 elif isinstance(value, dict):
                     self._extract_texts_recursive(value, new_path_parts, filepath, filename)
 
     def load_files_from_folder(self, folder_path):
-        self.text_display_area.config(state=tk.NORMAL) # Enable for modification
-        self.text_display_area.delete("1.0", tk.END)   # Clear existing content
+        self.text_display_area.config(state=tk.NORMAL) 
+        self.text_display_area.delete("1.0", tk.END)   
         
         self.text_data = []
         self._item_count_for_status = 0
@@ -107,7 +107,7 @@ class YamlTextEditorApp:
 
         if not yaml_files:
             self.status_var.set(f"No YAML files found in {folder_path}")
-            self.text_display_area.config(state=tk.DISABLED) # Disable if no files
+            self.text_display_area.config(state=tk.DISABLED)
             return
 
         for filepath in yaml_files:
@@ -116,10 +116,9 @@ class YamlTextEditorApp:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     data = yaml.safe_load(f)
                 
-                if data is None: # Empty file or only comments
+                if data is None: 
                     continue
                 
-                # Start recursive extraction from the root of the YAML data
                 self._extract_texts_recursive(data, [], filepath, filename)
 
             except yaml.YAMLError as e:
@@ -131,7 +130,7 @@ class YamlTextEditorApp:
                 self.status_var.set(error_msg)
                 print(f"Error reading {filepath}: {e}")
         
-        self.text_display_area.config(state=tk.DISABLED) # Disable after all insertions
+        self.text_display_area.config(state=tk.DISABLED) 
         self.status_var.set(f"Loaded {self._item_count_for_status} text items from {len(yaml_files)} YAML files.")
 
     def _get_value_by_path(self, data_dict, path_str):
@@ -155,30 +154,61 @@ class YamlTextEditorApp:
                 return False 
         
         last_key = keys[-1]
-        if isinstance(current_level, dict) and last_key in current_level: # Check if last_key exists
+        if isinstance(current_level, dict) and last_key in current_level:
             current_level[last_key] = value_to_set
             return True
         return False
 
-    def on_double_click(self, event):
-        # Get the line number at the click position (1-based for Text widget)
+    # New method to handle mouse press for line highlighting
+    def on_mouse_press(self, event):
+        current_widget_state = self.text_display_area.cget("state")
+        if current_widget_state == tk.DISABLED:
+            self.text_display_area.config(state=tk.NORMAL)
+
+        # Remove any existing custom line highlight from all lines
+        self.text_display_area.tag_remove("line_highlight", "1.0", tk.END)
+
         try:
-            # Get the beginning of the line clicked
+            # Get the index of the character at the click, then the start of that line
+            # e.g., "5.0" for the start of the 5th line
+            line_start_index = self.text_display_area.index(f"@{event.x},{event.y} linestart")
+            
+            # Get the line number (1-based) as an integer
+            line_number = int(line_start_index.split('.')[0])
+
+            # Ensure this line number corresponds to an actual item in self.text_data
+            # self.text_data is 0-based, Text widget lines are 1-based
+            if 1 <= line_number <= len(self.text_data):
+                # Define the end of the line (before the newline character)
+                line_end_index = f"{line_number}.end" # e.g. "5.end"
+                
+                # Add the highlight tag to the current line
+                self.text_display_area.tag_add("line_highlight", line_start_index, line_end_index)
+            # If the click is on an empty line or beyond actual content, no highlight is applied
+            # as the previous highlight was already removed.
+
+        except tk.TclError:
+            # This can happen if clicking in an empty area of the Text widget
+            # (e.g., below all text). In this case, we do nothing.
+            pass
+        finally:
+            # Restore the original state of the text widget if it was changed
+            if current_widget_state == tk.DISABLED:
+                self.text_display_area.config(state=tk.DISABLED)
+
+    def on_double_click(self, event):
+        try:
             text_widget_index = self.text_display_area.index(f"@{event.x},{event.y} linestart")
             line_number_str = text_widget_index.split('.')[0]
             line_number = int(line_number_str)
-            # Convert to 0-based index for self.text_data
             selected_0_based_index = line_number - 1 
-        except (tk.TclError, ValueError): # Click might be outside text content or error parsing index
-            return # Ignore click
+        except (tk.TclError, ValueError):
+            return
 
         if 0 <= selected_0_based_index < len(self.text_data):
             item_data = self.text_data[selected_0_based_index]
             self.open_edit_dialog(selected_0_based_index, item_data)
         else:
-            # This can happen if the click is on an empty area after the last line of text
-            # or if self.text_data got out of sync (less likely with current design)
-            # No error message needed, just ignore the click.
             pass
 
     def open_edit_dialog(self, item_0_based_index, item_data):
@@ -214,13 +244,13 @@ class YamlTextEditorApp:
         text_widget_editor = scrolledtext.ScrolledText(edit_window, wrap=tk.WORD, height=15, width=70, font=("Arial", 10))
         text_widget_editor.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
         text_widget_editor.insert(tk.END, current_text_val)
-        text_widget_editor.focus_set() # Set focus to the text editor
+        text_widget_editor.focus_set()
 
         button_frame = tk.Frame(edit_window)
         button_frame.pack(pady=10)
 
         def save_changes():
-            new_text = text_widget_editor.get("1.0", tk.END).rstrip('\n') # Remove only trailing newline
+            new_text = text_widget_editor.get("1.0", tk.END).rstrip('\n')
 
             try:
                 with open(item_data['filepath'], 'r', encoding='utf-8') as f:
@@ -231,22 +261,16 @@ class YamlTextEditorApp:
                     return
 
                 with open(item_data['filepath'], 'w', encoding='utf-8') as f:
-                    # Preserving key order (sort_keys=False) and block style (default_flow_style=False)
                     yaml.dump(yaml_content, f, sort_keys=False, default_flow_style=False, allow_unicode=True, indent=2)
 
-                # Update internal data store
                 self.text_data[item_0_based_index]['original_text'] = new_text 
                 
-                # Update the Text widget display for the modified line
                 self.text_display_area.config(state=tk.NORMAL)
                 
                 target_line_1_based = item_0_based_index + 1
                 
-                # Delete the old line content including its newline
-                # Deletes from start of target_line_1_based to start of the next line
                 self.text_display_area.delete(f"{target_line_1_based}.0", f"{target_line_1_based + 1}.0")
 
-                # Prepare new content parts for display
                 filename_part = os.path.basename(item_data['filepath'])
                 message_key_part = item_data['message_key']
                 display_text_updated_preview = str(new_text).replace('\n', ' ').replace('\r', '')
@@ -254,9 +278,6 @@ class YamlTextEditorApp:
                 if len(display_text_updated_preview) > 100:
                     preview_updated += "..."
                 
-                # Insert new content with tags. tk.INSERT refers to the current cursor position,
-                # which automatically advances after each insert on the same line.
-                # Start insertion at the beginning of the now-empty line.
                 insert_start_pos = f"{target_line_1_based}.0"
 
                 self.text_display_area.insert(insert_start_pos, filename_part, "filename_color")
@@ -264,15 +285,13 @@ class YamlTextEditorApp:
                 self.text_display_area.insert(tk.INSERT, message_key_part, "messagekey_color")
                 self.text_display_area.insert(tk.INSERT, " :: ", "separator_color")
                 self.text_display_area.insert(tk.INSERT, preview_updated, "text_preview_color")
-                self.text_display_area.insert(tk.INSERT, "\n") # Add the newline for this logical line
+                self.text_display_area.insert(tk.INSERT, "\n")
 
-                # Manage selection and view
-                self.text_display_area.tag_remove(tk.SEL, "1.0", tk.END) # Clear previous selection (if any)
+                self.text_display_area.tag_remove(tk.SEL, "1.0", tk.END) 
                 start_sel = f"{target_line_1_based}.0"
-                # .end on a line refers to the position just BEFORE the newline character of that line.
                 end_sel = f"{target_line_1_based}.end" 
                 self.text_display_area.tag_add(tk.SEL, start_sel, end_sel)
-                self.text_display_area.see(start_sel) # Ensure the updated line is visible
+                self.text_display_area.see(start_sel) 
 
                 self.text_display_area.config(state=tk.DISABLED)
 
