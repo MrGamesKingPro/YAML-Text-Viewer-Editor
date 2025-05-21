@@ -84,10 +84,28 @@ class YamlTextEditorApp:
         self.text_display_area.tag_configure("line_highlight", background="light sky blue")
         self.text_display_area.tag_configure("symbol_color", foreground="blue") # For special symbols
 
-        # Regex for symbols based on examples like \n[1], \c[0], <br>, \aub etc.
-        # Added literal [] and <> as symbols
+        # Regex for symbols.
+        # Updated the first group of codes to handle [num] specifically
+        # and to make sure absorbed text doesn't include other '\' codes.
         self.symbol_regex = re.compile(
-            r"(\\(?:aub|kel|her|Com|SINV|sinv|n|c|mar)(?:\[[0-9]+\]|[0-9]*)?|\\!|<br>|\\\{|\\\}|\\[\\]|<>|\\)"
+            r"("
+            # Group 1: Codes that can take [num] or num modifiers, or absorb following text.
+            # If \code[num] is used, text after [num] is NOT part of the symbol.
+            # If \codeNUMtext or \codeTEXT, NUMtext/TEXT (not starting with \) is part of the symbol.
+            r"\\(?:aub|kel|her|Com|SINV|sinv)(?:\[[0-9]+\]|[0-9]*[^\s\\]*)"
+            r"|"
+            # Group 2: Codes that do not absorb following text but can have [num] or num: \n, \c, \mar
+            r"\\(?:n|c|mar)(?:\[[0-9]+\]|[0-9]*)?"
+            r"|"
+            # Group 3: Other specific symbols
+            r"\\!"       # \!
+            r"|<br>"      # <br>
+            r"|\\\{"     # \{
+            r"|\\\}"     # \}
+            r"|\\[\\]"   # [] (literal brackets)
+            r"|<>"        # <> (literal angle brackets)
+            r"|\\"        # \ (literal backslash, if not part of a longer code)
+            r")"
         )
 
 
@@ -173,6 +191,32 @@ class YamlTextEditorApp:
                     self._item_count_for_status += 1
                 elif isinstance(value, dict): 
                     self._extract_texts_recursive(value, new_path_parts, filepath, filename)
+                elif isinstance(value, list): # Handle lists of strings or dicts
+                    for i, item in enumerate(value):
+                        # Create a path part that indicates a list index, e.g., key[0]
+                        indexed_key_str = f"{key_str}[{i}]"
+                        new_list_item_path_parts = current_path_parts + [indexed_key_str]
+
+                        if isinstance(item, str):
+                            message_key_path = ".".join(new_list_item_path_parts)
+                            self.text_data.append({
+                                'filepath': filepath,
+                                'message_key': message_key_path,
+                                'original_text': item
+                            })
+                            display_text_preview_full = str(item).replace('\n', ' ').replace('\r', '')
+                            self.text_display_area.insert(tk.END, filename, "filename_color")
+                            self.text_display_area.insert(tk.END, " :: ", "separator_color")
+                            self.text_display_area.insert(tk.END, message_key_path, "messagekey_color")
+                            self.text_display_area.insert(tk.END, " :: ", "separator_color")
+                            preview = display_text_preview_full[:100]
+                            if len(display_text_preview_full) > 100:
+                                preview += "..."
+                            self._insert_formatted_preview(preview)
+                            self.text_display_area.insert(tk.END, "\n")
+                            self._item_count_for_status += 1
+                        elif isinstance(item, dict):
+                            self._extract_texts_recursive(item, new_list_item_path_parts, filepath, filename)
 
 
     def load_files_from_folder(self, folder_path):
@@ -228,22 +272,24 @@ class YamlTextEditorApp:
             if isinstance(current_level, dict) and key_segment in current_level:
                 current_level = current_level[key_segment]
             else:
+                # Regex to match 'keyname[index]'
                 match = re.fullmatch(r"(.+)\[([0-9]+)\]", key_segment)
-                if match and isinstance(current_level, dict) and match.group(1) in current_level:
+                if match and isinstance(current_level, dict):
                     list_name = match.group(1)
                     idx = int(match.group(2))
-                    if isinstance(current_level[list_name], list) and idx < len(current_level[list_name]):
+                    if list_name in current_level and isinstance(current_level[list_name], list) and idx < len(current_level[list_name]):
                         current_level = current_level[list_name][idx]
-                    else: return None
+                    else:
+                        return None # List or index out of bounds
                 else:
-                    return None 
+                    return None # Key not found or not a list access
         return current_level
 
     def _set_value_by_path(self, data_dict, path_str, value_to_set):
         keys = path_str.split('.')
         current_level = data_dict
         
-        for i, key_segment in enumerate(keys[:-1]): 
+        for i, key_segment in enumerate(keys[:-1]): # Iterate until the second to last key
             match = re.fullmatch(r"(.+)\[([0-9]+)\]", key_segment)
             if match:
                 list_name = match.group(1)
@@ -251,11 +297,11 @@ class YamlTextEditorApp:
                 if isinstance(current_level, dict) and list_name in current_level and \
                    isinstance(current_level[list_name], list) and idx < len(current_level[list_name]):
                     current_level = current_level[list_name][idx]
-                else: return False 
+                else: return False # Path segment not found or incorrect type
             elif isinstance(current_level, dict) and key_segment in current_level:
                 current_level = current_level[key_segment]
             else:
-                return False 
+                return False # Path segment not found
         
         last_key = keys[-1]
         match_last = re.fullmatch(r"(.+)\[([0-9]+)\]", last_key)
@@ -266,11 +312,11 @@ class YamlTextEditorApp:
                isinstance(current_level[list_name], list) and idx < len(current_level[list_name]):
                 current_level[list_name][idx] = value_to_set
                 return True
-            return False
+            return False # Final list item access failed
         elif isinstance(current_level, dict) and last_key in current_level:
             current_level[last_key] = value_to_set
             return True
-        return False
+        return False # Final key not found or current_level is not a dict
 
     def on_mouse_press(self, event):
         current_widget_state = self.text_display_area.cget("state")
@@ -284,7 +330,7 @@ class YamlTextEditorApp:
             line_start_index = self.text_display_area.index(f"@{event.x},{event.y} linestart")
             line_number = int(line_start_index.split('.')[0])
 
-            if 1 <= line_number <= len(self.text_data) + self.text_display_area.count("\n", "1.0", tk.END)[0] : 
+            if 1 <= line_number <= len(self.text_data) : 
                 line_end_index = f"{line_number}.end"
                 self.text_display_area.tag_add("line_highlight", line_start_index, line_end_index)
         except tk.TclError:
@@ -300,7 +346,7 @@ class YamlTextEditorApp:
             line_number = int(line_number_str)
             selected_0_based_index = line_number - 1 
         except (tk.TclError, ValueError):
-            return
+            return 
 
         if 0 <= selected_0_based_index < len(self.text_data):
             item_data = self.text_data[selected_0_based_index]
@@ -316,7 +362,7 @@ class YamlTextEditorApp:
         item_data = self.text_data[item_0_based_index]
         new_text_value = item_data['original_text']
 
-        self.text_display_area.delete(f"{target_line_1_based}.0", f"{target_line_1_based + 1}.0")
+        self.text_display_area.delete(f"{target_line_1_based}.0", f"{target_line_1_based + 1}.0") 
 
         filename_part = os.path.basename(item_data['filepath'])
         message_key_part = item_data['message_key']
@@ -329,9 +375,12 @@ class YamlTextEditorApp:
         insert_start_pos = f"{target_line_1_based}.0"
 
         self.text_display_area.insert(insert_start_pos, filename_part, "filename_color")
-        self.text_display_area.insert(tk.INSERT, " :: ", "separator_color")
-        self.text_display_area.insert(tk.INSERT, message_key_part, "messagekey_color")
-        self.text_display_area.insert(tk.INSERT, " :: ", "separator_color")
+        current_insert_pos = self.text_display_area.index(tk.INSERT) 
+        self.text_display_area.insert(current_insert_pos, " :: ", "separator_color")
+        current_insert_pos = self.text_display_area.index(tk.INSERT)
+        self.text_display_area.insert(current_insert_pos, message_key_part, "messagekey_color")
+        current_insert_pos = self.text_display_area.index(tk.INSERT)
+        self.text_display_area.insert(current_insert_pos, " :: ", "separator_color")
         
         self._insert_formatted_preview(preview_updated) 
         
@@ -352,6 +401,10 @@ class YamlTextEditorApp:
             current_item_data = self.text_data[item_0_based_index]
             current_text_val = current_item_data['original_text']
                 
+        except IndexError:
+            messagebox.showerror("Error", "The item index is out of bounds. The data may have changed.", parent=edit_window)
+            edit_window.destroy()
+            return
         except Exception as e:
             messagebox.showerror("Error", f"Could not get current text for editing: {e}", parent=edit_window)
             edit_window.destroy()
@@ -363,20 +416,15 @@ class YamlTextEditorApp:
         text_widget_editor = scrolledtext.ScrolledText(edit_window, wrap=tk.WORD, height=15, width=70, font=("Arial", 10))
         text_widget_editor.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
         
-        # Configure tag for symbol highlighting in the editor
         text_widget_editor.tag_configure("dialog_symbol_color", foreground="blue")
 
-        # Insert text with symbol highlighting
         last_end = 0
-        for match in self.symbol_regex.finditer(current_text_val):
+        for match in self.symbol_regex.finditer(current_text_val): # Use the same regex for consistency
             start, end = match.span()
-            # Insert text before the symbol (if any)
             if start > last_end:
                 text_widget_editor.insert(tk.END, current_text_val[last_end:start])
-            # Insert the symbol with the tag
             text_widget_editor.insert(tk.END, current_text_val[start:end], "dialog_symbol_color")
             last_end = end
-        # Insert any remaining text after the last symbol
         if last_end < len(current_text_val):
             text_widget_editor.insert(tk.END, current_text_val[last_end:])
         
@@ -387,14 +435,18 @@ class YamlTextEditorApp:
 
         def save_changes():
             new_text = text_widget_editor.get("1.0", tk.END).rstrip('\n')
+            
             target_item_data_entry = self.text_data[item_0_based_index]
 
             try:
                 with open(target_item_data_entry['filepath'], 'r', encoding='utf-8') as f:
                     yaml_content = yaml.safe_load(f)
                 
+                if yaml_content is None: 
+                    yaml_content = {} 
+
                 if not self._set_value_by_path(yaml_content, target_item_data_entry['message_key'], new_text):
-                    messagebox.showerror("Save Error", f"Failed to update the value at path '{target_item_data_entry['message_key']}'. The file structure may have changed.", parent=edit_window)
+                    messagebox.showerror("Save Error", f"Failed to update the value at path '{target_item_data_entry['message_key']}'. The file structure may have changed or the path is incorrect.", parent=edit_window)
                     return
 
                 with open(target_item_data_entry['filepath'], 'w', encoding='utf-8') as f:
@@ -475,16 +527,16 @@ class YamlTextEditorApp:
                     
                     self.replace_button.config(state=tk.NORMAL)
                     self.status_var.set(f"Found '{search_term}' in '{item_data['message_key']}' (line {display_line_num}).")
-                    return True
+                    return True 
             
-            if start_item_idx > 0 or start_char_idx_in_item_text > 0 :
+            if start_item_idx > 0 or start_char_idx_in_item_text > 0 : 
                 self.last_search_offset = (0,0) 
                 self.status_var.set(f"Reached end of document. Continuing search from beginning for '{search_term}'.")
                 self.replace_button.config(state=tk.DISABLED) 
                 if hasattr(self, '_find_next_wrapped') and self._find_next_wrapped:
                      pass 
                 else:
-                    self._find_next_wrapped = True
+                    self._find_next_wrapped = True 
                     return self.find_next_text(restart_search_if_term_changed=False) 
 
             self.status_var.set(f"'{search_term}' not found.")
@@ -510,14 +562,17 @@ class YamlTextEditorApp:
         
         item_data = self.text_data[item_idx]
         old_text = item_data['original_text']
+        
         new_text = old_text[:match_start] + replace_term + old_text[match_end:]
 
         try:
             with open(item_data['filepath'], 'r', encoding='utf-8') as f:
                 yaml_content = yaml.safe_load(f)
             
+            if yaml_content is None: yaml_content = {}
+
             if not self._set_value_by_path(yaml_content, item_data['message_key'], new_text):
-                messagebox.showerror("Save Error", f"Failed to update value for key '{item_data['message_key']}' in file. Structure may have changed.")
+                messagebox.showerror("Save Error", f"Failed to update value for key '{item_data['message_key']}' in file. Structure may have changed or path is incorrect.")
                 self.status_var.set(f"Error: Could not set value for '{item_data['message_key']}'.")
                 return
 
@@ -525,10 +580,14 @@ class YamlTextEditorApp:
                 yaml.dump(yaml_content, f, sort_keys=False, default_flow_style=False, allow_unicode=True, indent=2)
 
             item_data['original_text'] = new_text
-            self._update_display_line(item_idx)
+            self._update_display_line(item_idx) 
             
             self.status_var.set(f"Replaced '{search_term}' with '{replace_term}' in '{item_data['message_key']}'. Finding next...")
+            
             self.last_search_offset = (item_idx, match_start + len(replace_term))
+            self.current_search_result = None 
+            self.replace_button.config(state=tk.DISABLED) 
+            
             self.find_next_text(restart_search_if_term_changed=False) 
 
         except Exception as e:
@@ -570,16 +629,17 @@ class YamlTextEditorApp:
                 if item_data['filepath'] not in modified_files_content:
                     try:
                         with open(item_data['filepath'], 'r', encoding='utf-8') as f:
-                            modified_files_content[item_data['filepath']] = yaml.safe_load(f)
+                            content = yaml.safe_load(f)
+                            modified_files_content[item_data['filepath']] = content if content is not None else {}
                     except Exception as e:
-                        messagebox.showerror("File Read Error", f"Could not read {item_data['filepath']} for Replace All: {e}")
-                        self.status_var.set(f"Error reading {item_data['filepath']} during Replace All.")
+                        messagebox.showerror("File Read Error", f"Could not read {item_data['filepath']} for Replace All: {e}", parent=self.master)
+                        self.status_var.set(f"Error reading {item_data['filepath']} during Replace All. Aborting.")
                         return 
 
                 if not self._set_value_by_path(modified_files_content[item_data['filepath']], item_data['message_key'], new_doc_text):
-                    messagebox.showerror("Update Error", f"Failed to set path '{item_data['message_key']}' in {item_data['filepath']} during Replace All.")
-                    self.status_var.set(f"Error setting path in {item_data['filepath']}.")
-                    return
+                    messagebox.showerror("Update Error", f"Failed to set path '{item_data['message_key']}' in {item_data['filepath']} during Replace All.", parent=self.master)
+                    self.status_var.set(f"Error setting path in {item_data['filepath']}. Aborting.")
+                    return 
 
 
         if total_replacements_count > 0:
@@ -588,19 +648,43 @@ class YamlTextEditorApp:
                     with open(filepath, 'w', encoding='utf-8') as f:
                         yaml.dump(yaml_data_to_write, f, sort_keys=False, default_flow_style=False, allow_unicode=True, indent=2)
                 except Exception as e:
-                    messagebox.showerror("File Write Error", f"Could not write changes to {filepath}: {e}")
-                    self.status_var.set(f"Error writing {filepath} during Replace All.")
+                    messagebox.showerror("File Write Error", f"Could not write changes to {filepath}: {e}", parent=self.master)
+                    self.status_var.set(f"Error writing {filepath} during Replace All. Some files may not be updated.")
+                    
+            current_widget_state = self.text_display_area.cget("state")
+            is_disabled = (current_widget_state == tk.DISABLED)
+            if is_disabled: self.text_display_area.config(state=tk.NORMAL)
+            self.text_display_area.delete("1.0", tk.END) 
+
+            self._item_count_for_status = 0 
+            for item_data_reloaded in self.text_data:
+                filename = os.path.basename(item_data_reloaded['filepath'])
+                message_key_path = item_data_reloaded['message_key']
+                value = item_data_reloaded['original_text']
+                
+                display_text_preview_full = str(value).replace('\n', ' ').replace('\r', '')
+                
+                self.text_display_area.insert(tk.END, filename, "filename_color")
+                self.text_display_area.insert(tk.END, " :: ", "separator_color")
+                self.text_display_area.insert(tk.END, message_key_path, "messagekey_color")
+                self.text_display_area.insert(tk.END, " :: ", "separator_color")
+                
+                preview = display_text_preview_full[:100]
+                if len(display_text_preview_full) > 100:
+                    preview += "..."
+                
+                self._insert_formatted_preview(preview) 
+                self.text_display_area.insert(tk.END, "\n")
+                self._item_count_for_status +=1
             
-            self.status_var.set(f"Replaced {total_replacements_count} occurrence(s). Reloading files...")
-            current_path = self.current_folder_path.get()
-            if current_path and os.path.isdir(current_path):
-                 self.load_files_from_folder(current_path)
-            else: 
-                 self.status_var.set(f"Replaced {total_replacements_count} occurrence(s). Please reload folder manually if needed.")
+            if is_disabled: self.text_display_area.config(state=tk.DISABLED)
+            self.status_var.set(f"Replaced {total_replacements_count} occurrence(s) across {len(modified_files_content)} file(s). Display updated.")
 
             self.current_search_result = None
             self.last_search_offset = (0,0)
             self.replace_button.config(state=tk.DISABLED) 
+            self.text_display_area.tag_remove("line_highlight", "1.0", tk.END)
+
 
         else:
             self.status_var.set(f"No occurrences of '{search_term}' found to replace.")
