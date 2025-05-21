@@ -5,6 +5,8 @@
 # YAML-Text-Viewer-Editor
 This tool allows you to browse a folder containing YAML files (.yaml or .yml), view all string values within those files along with their hierarchical keys, and edit these string values directly.
 
+![YAML](https://github.com/user-attachments/assets/158e4d9e-30af-40b1-8125-809068a7b23d)
+
 ### Python Requirements
 
  install Python 3.6 or newer, 
