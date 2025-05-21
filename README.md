@@ -1,4 +1,4 @@
-# Based on the program
+# Based on the Tool
 
 [OMORI-HERO-YAML-File-Converter](https://github.com/MrGamesKingPro/OMORI-HERO-YAML-File-Converter)
 
