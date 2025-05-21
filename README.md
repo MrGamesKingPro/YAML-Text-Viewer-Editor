@@ -67,6 +67,33 @@ This tool allows you to browse a folder containing YAML files (.yaml or .yml), v
        *   The dialog will close, and the original YAML file and the main display will remain unchanged.
    *   If any error occurs during saving (e.g., the file was modified externally and the key path is no longer valid), an error message box will appear.
 
+   6.  **Searching for Text:**
+        *   Type your desired search term into the "Search" entry field.
+        *   The "Find Next" and "Replace All" buttons will become enabled.
+        *   Check/uncheck "Case Sensitive" as needed.
+        *   Click "Find Next".
+            *   If found, the line containing the first occurrence (from the current position or top) will be highlighted in the Text Display Area, and the view will scroll to it.
+            *   The "Replace" button will become enabled.
+            *   The status bar will indicate where it was found.
+            *   Clicking "Find Next" again will find the subsequent occurrence. The search wraps around to the beginning of the document if it reaches the end.
+    7.  **Replacing Text (One by One):**
+        *   First, use "Find Next" to locate an occurrence of the text you want to replace.
+        *   Enter the replacement text into the "Replace" entry field.
+        *   Click the "Replace" button.
+            *   The currently highlighted text (from the "Find Next" operation) will be replaced in memory *and* saved to the YAML file on disk.
+            *   The display line will update.
+            *   The application will automatically perform a "Find Next" for the original search term to move to the next potential replacement.
+    8.  **Replacing All Text:**
+        *   Enter your search term in the "Search" field and the replacement text in the "Replace" field.
+        *   Click the "Replace All" button.
+        *   **A confirmation dialog will appear.** This action modifies multiple files and is not easily undone, so confirm carefully.
+        *   If you confirm:
+            *   The application will iterate through all loaded text items.
+            *   For each item, it will find and replace all occurrences of the search term with the replace term.
+            *   All affected YAML files will be re-written to disk with the changes.
+            *   After processing, the application will automatically reload all files from the folder to reflect the changes in the Text Display Area.
+            *   The status bar will report the total number of replacements made.
+
 **6. Working with Other Folders:**
    *   If you want to work with YAML files in a different folder, simply click the "Browse..." button again and select a new folder. The main display area will clear and then populate with the text items from the newly selected folder.
 
