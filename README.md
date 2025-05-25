@@ -14,7 +14,7 @@ This tool allows you to browse a folder containing YAML files (.yaml or .yml), v
 1.  install library:
 
     ```bash
-        pip install PyYAML
+        pip install PyYAML ruamel.yaml
     ```
 
 ---
